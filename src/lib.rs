@@ -22,6 +22,7 @@ pub struct Column {
 
 pub struct Archetype {
     columns: Vec<Column>,
+    column_index: HashMap<ComponentId, usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -42,11 +43,16 @@ impl EntityCreator<'_> {
         let mut any_vec = AnyVec::new(Layout::array::<T>(1).unwrap());
         any_vec.push(component);
 
+        let component_id = TypeId::of::<T>();
+
         self.archetype.columns.push(Column {
             components: any_vec,
         });
 
-        let component_id = TypeId::of::<T>();
+        self.archetype
+            .column_index
+            .insert(component_id, self.archetype.column_index.len());
+
         self.components_set.insert(component_id);
 
         self.world
@@ -61,22 +67,56 @@ impl EntityCreator<'_> {
     }
 
     pub fn finish(self) -> EntityRecord {
-        let entity_id = self.world.entity_index.len();
-        let entity_record = EntityRecord {
-            id: entity_id,
-            archetype_id: self.world.archetypes.len(),
-            row: 0,
-        };
+        if let Some(archetype_id) = self.world.archetype_index.get(&self.components_set) {
+            let archetype = self.world.archetypes.get_mut(*archetype_id).unwrap();
 
-        self.world.entity_index.insert(entity_id, entity_record);
+            let entity_record = EntityRecord {
+                archetype_id: *archetype_id,
+                id: self.world.entity_index.len(),
+                row: archetype.column_index.len(),
+            };
 
-        self.world
-            .archetype_index
-            .insert(self.components_set, self.world.archetypes.len());
+            archetype
+                .column_index
+                .iter()
+                .for_each(|(component_id, index)| {
+                    let column = archetype.columns.get_mut(*index).unwrap();
+                    let component_index = self.archetype.column_index.get(component_id).unwrap();
+                    let component = self
+                        .archetype
+                        .columns
+                        .get(*component_index)
+                        .unwrap()
+                        .components
+                        .get_raw(*component_index)
+                        .unwrap();
 
-        self.world.archetypes.push(self.archetype);
+                    column.components.push_raw(component);
+                });
 
-        entity_record
+            self.world
+                .entity_index
+                .insert(entity_record.id, entity_record);
+
+            entity_record
+        } else {
+            let entity_id = self.world.entity_index.len();
+            let entity_record = EntityRecord {
+                id: entity_id,
+                archetype_id: self.world.archetypes.len(),
+                row: 0,
+            };
+
+            self.world.entity_index.insert(entity_id, entity_record);
+
+            self.world
+                .archetype_index
+                .insert(self.components_set, self.world.archetypes.len());
+
+            self.world.archetypes.push(self.archetype);
+
+            entity_record
+        }
     }
 }
 
@@ -134,7 +174,10 @@ impl World {
         EntityCreator {
             world: self,
             components_set: BTreeSet::new(),
-            archetype: Archetype { columns: vec![] },
+            archetype: Archetype {
+                columns: vec![],
+                column_index: HashMap::new(),
+            },
         }
     }
 }
@@ -223,5 +266,32 @@ mod tests {
 
         let name = world.get_component::<Name>(entity_record.id).unwrap();
         assert_eq!(name.0, "Queco");
+    }
+
+    #[test]
+    fn spawn_two_entities_with_the_same_component() {
+        let mut world = World::default();
+
+        let carles = Name(String::from("Carles"));
+        let carles = world.spawn().with_component(carles).finish();
+
+        let queco = Name(String::from("Queco"));
+        let queco = world.spawn().with_component(queco).finish();
+
+        assert_eq!(carles.id, 0);
+        assert_eq!(carles.row, 0);
+
+        assert_eq!(queco.id, 1);
+        assert_eq!(queco.row, 1);
+
+        assert_eq!(world.archetype_index.len(), 1);
+        assert_eq!(world.entity_index.len(), 2);
+        assert_eq!(world.component_index.len(), 1);
+
+        let carles = world.get_component::<Name>(carles.id).unwrap();
+        let queco = world.get_component::<Name>(queco.id).unwrap();
+
+        assert_eq!(carles.0, "Carles");
+        assert_eq!(queco.0, "Queco");
     }
 }

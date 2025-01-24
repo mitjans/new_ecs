@@ -54,6 +54,20 @@ impl AnyVec {
         }
     }
 
+    pub fn push_raw(&mut self, bytes: *const u8) {
+        if self.len == self.cap {
+            self.grow();
+        }
+
+        let dst = unsafe { self.ptr.as_ptr().add(self.len * self.layout.size()) };
+
+        unsafe {
+            copy_nonoverlapping(bytes, dst, self.layout.size());
+        }
+
+        self.len += 1;
+    }
+
     pub fn push<T>(&mut self, element: T) {
         if self.len == self.cap {
             self.grow();
@@ -79,6 +93,14 @@ impl AnyVec {
         self.len -= 1;
         let src = unsafe { self.ptr.as_ptr().add(self.len * self.layout.size()) as *const T };
         Some(unsafe { read(src) })
+    }
+
+    pub fn get_raw(&self, index: usize) -> Option<*const u8> {
+        if index >= self.len {
+            return None;
+        }
+
+        Some(unsafe { self.ptr.as_ptr().add(index * self.layout.size()) })
     }
 
     pub fn get<T>(&self, index: usize) -> Option<&T> {
