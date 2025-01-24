@@ -24,7 +24,7 @@ pub struct Archetype {
     columns: Vec<Column>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct EntityRecord {
     pub id: EntityId,
     pub archetype_id: ArchetypeId,
@@ -153,6 +153,12 @@ mod tests {
 
         let entity_record = world.spawn().with_component(Health(150)).finish();
 
+        assert_eq!(world.entity_index.len(), 1);
+
+        assert_eq!(
+            *world.entity_index.get(&entity_record.id).unwrap(),
+            entity_record
+        );
         assert_eq!(world.archetypes.len(), 1);
         assert_eq!(entity_record.archetype_id, 0);
         assert_eq!(entity_record.row, 0);
