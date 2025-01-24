@@ -24,7 +24,7 @@ pub struct Column {
 #[derive(Debug)]
 pub struct Archetype {
     columns: Vec<Column>,
-    entities: HashMap<EntityId, usize>,
+    entities: Vec<EntityId>,
     column_index: HashMap<ComponentId, usize>,
 }
 
@@ -71,9 +71,7 @@ impl EntityCreator<'_> {
                 row: archetype.column_index.len(),
             };
 
-            archetype
-                .entities
-                .insert(entity_record.id, entity_record.row);
+            archetype.entities.push(entity_record.id);
 
             archetype
                 .column_index
@@ -117,7 +115,7 @@ impl EntityCreator<'_> {
                         .insert(self.world.archetypes.len(), index);
                 });
 
-            self.archetype.entities.insert(entity_id, 0);
+            self.archetype.entities.push(entity_id);
             self.world.entity_index.insert(entity_id, entity_record);
 
             self.world
@@ -142,7 +140,7 @@ impl<'a> QueryCreator<'a> {
         self
     }
 
-    pub fn run(self) -> (Vec<Vec<&'a AnyVec>>, Vec<Vec<Vec<EntityId>>>) {
+    pub fn run(self) -> (Vec<&'a AnyVec>, Vec<Vec<EntityId>>) {
         let mut components = vec![];
         let mut entities = vec![];
 
@@ -150,8 +148,6 @@ impl<'a> QueryCreator<'a> {
             let Some(archetype_ids) = self.world.component_index.get(component_id) else {
                 panic!("Component not registered!")
             };
-            let mut component = vec![];
-            let mut entity = vec![];
 
             archetype_ids.iter().for_each(|(archetype_id, column_id)| {
                 let Some(archetype) = self.world.archetypes.get(*archetype_id) else {
@@ -162,15 +158,9 @@ impl<'a> QueryCreator<'a> {
                     panic!("Column not found");
                 };
 
-                let keys = archetype.entities.keys();
-
-                entity.push(keys.copied().collect());
-
-                component.push(&column.components);
+                entities.push(archetype.entities.to_vec());
+                components.push(&column.components);
             });
-
-            components.push(component);
-            entities.push(entity);
         });
 
         (components, entities)
@@ -233,7 +223,7 @@ impl World {
             components_set: BTreeSet::new(),
             archetype: Archetype {
                 columns: vec![],
-                entities: HashMap::new(),
+                entities: Vec::new(),
                 column_index: HashMap::new(),
             },
         }
@@ -315,8 +305,8 @@ mod tests {
         assert_eq!(healths.len(), 1);
         assert_eq!(healths.len(), names.len());
 
-        let health = healths.get::<Health>(0).unwrap();
-        let name = names.get::<Name>(0).unwrap();
+        let health = healths.first::<Health>().unwrap();
+        let name = names.first::<Name>().unwrap();
 
         assert_eq!(health.0, 40);
         assert_eq!(name.0, "Carles");
@@ -373,17 +363,15 @@ mod tests {
         let (components, entities) = world.query().with_component::<Name>().run();
 
         assert_eq!(components.len(), 1);
-        assert_eq!(components.first().unwrap().len(), 1);
-        assert_eq!(components.first().unwrap().first().unwrap().len(), 2);
+        assert_eq!(components.first().unwrap().len(), 2);
 
         assert_eq!(entities.len(), 1);
-        assert_eq!(entities.first().unwrap().len(), 1);
-        assert_eq!(entities.first().unwrap().first().unwrap().len(), 2);
+        assert_eq!(entities.first().unwrap().len(), 2);
 
-        let names = *components.first().unwrap().first().unwrap();
-        let entities = entities.first().unwrap().first().unwrap();
+        let names = *components.first().unwrap();
+        let entities = entities.first().unwrap();
 
-        let first_name = names.get::<Name>(0).unwrap();
+        let first_name = names.first::<Name>().unwrap();
         let second_name = names.get::<Name>(1).unwrap();
 
         assert_eq!(first_name.0, "Carles");

@@ -132,4 +132,12 @@ impl AnyVec {
     pub fn layout(&self) -> Layout {
         self.layout
     }
+
+    pub fn first<T>(&self) -> Option<&T> {
+        if self.len == 0 {
+            return None;
+        }
+
+        self.get(0)
+    }
 }
