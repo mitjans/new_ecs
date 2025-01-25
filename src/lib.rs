@@ -1,6 +1,8 @@
 mod any_vec;
+mod resources;
 
 pub use any_vec::AnyVec;
+use resources::Resources;
 use std::{
     alloc::Layout,
     any::{Any, TypeId},
@@ -235,10 +237,28 @@ impl<'a> Iterator for QueryIter<'a> {
 #[derive(Default)]
 pub struct World {
     archetypes: Vec<Archetype>,
-
+    resources: Resources,
     entity_index: HashMap<EntityId, EntityRecord>,
     archetype_index: HashMap<ComponentType, ArchetypeId>,
     component_index: HashMap<ComponentId, ArchetypeMap>,
+}
+
+impl World {
+    pub fn add_resource<T: Any>(&mut self, resource: T) {
+        self.resources.add(resource);
+    }
+
+    pub fn get_resource<T: Any>(&self) -> Option<&T> {
+        self.resources.get_ref::<T>()
+    }
+
+    pub fn get_resource_mut<T: Any>(&mut self) -> Option<&mut T> {
+        self.resources.get_mut::<T>()
+    }
+
+    pub fn delete_resource<T: Any>(&mut self) {
+        self.resources.delete::<T>();
+    }
 }
 
 impl World {
@@ -282,7 +302,7 @@ impl World {
             .get_mut::<T>(entity_record.row)
     }
 
-    pub fn spawn(&mut self) -> EntityCreator {
+    pub fn create_entity(&mut self) -> EntityCreator {
         EntityCreator {
             world: self,
             components_set: BTreeSet::new(),
@@ -313,7 +333,7 @@ mod tests {
     fn spawn_entity_with_single_component() {
         let mut world = World::default();
 
-        let entity_record = world.spawn().with_component(Health(150)).spawn();
+        let entity_record = world.create_entity().with_component(Health(150)).spawn();
 
         assert_eq!(world.entity_index.len(), 1);
 
@@ -343,7 +363,7 @@ mod tests {
         let mut world = World::default();
 
         let entity_record = world
-            .spawn()
+            .create_entity()
             .with_component(Health(40))
             .with_component(Name(String::from("Carles")))
             .spawn();
@@ -392,10 +412,10 @@ mod tests {
         let mut world = World::default();
 
         let carles = Name(String::from("Carles"));
-        let carles = world.spawn().with_component(carles).spawn();
+        let carles = world.create_entity().with_component(carles).spawn();
 
         let queco = Name(String::from("Queco"));
-        let queco = world.spawn().with_component(queco).spawn();
+        let queco = world.create_entity().with_component(queco).spawn();
 
         assert_eq!(carles.id, 0);
         assert_eq!(carles.row, 0);
@@ -419,11 +439,11 @@ mod tests {
         let mut world = World::default();
 
         let carles = Name(String::from("Carles"));
-        world.spawn().with_component(carles).spawn();
+        world.create_entity().with_component(carles).spawn();
 
         let queco = Name(String::from("Queco"));
         world
-            .spawn()
+            .create_entity()
             .with_component(queco)
             .with_component(Health(123))
             .spawn();
@@ -447,11 +467,11 @@ mod tests {
         let mut world = World::default();
 
         let carles = Name(String::from("Carles"));
-        world.spawn().with_component(carles).spawn();
+        world.create_entity().with_component(carles).spawn();
 
         let queco = Name(String::from("Queco"));
         world
-            .spawn()
+            .create_entity()
             .with_component(queco)
             .with_component(Health(123))
             .spawn();
@@ -482,11 +502,11 @@ mod tests {
         let mut world = World::default();
 
         let carles = Name(String::from("Carles"));
-        world.spawn().with_component(carles).spawn();
+        world.create_entity().with_component(carles).spawn();
 
         let queco = Name(String::from("Queco"));
         world
-            .spawn()
+            .create_entity()
             .with_component(queco)
             .with_component(Health(123))
             .spawn();
