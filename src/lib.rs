@@ -146,7 +146,7 @@ impl QueryCreator {
             .iter()
             .map(|component_id| {
                 let Some(archetype_map) = world.component_index.get(component_id) else {
-                    panic!("Component not regitered")
+                    return BTreeSet::new();
                 };
 
                 archetype_map.keys().copied().collect::<BTreeSet<_>>()
@@ -236,11 +236,11 @@ impl<'a> Iterator for QueryIter<'a> {
 
 #[derive(Default)]
 pub struct World {
-    archetypes: Vec<Archetype>,
-    resources: Resources,
-    entity_index: HashMap<EntityId, EntityRecord>,
-    archetype_index: HashMap<ComponentType, ArchetypeId>,
-    component_index: HashMap<ComponentId, ArchetypeMap>,
+    pub archetypes: Vec<Archetype>,
+    pub resources: Resources,
+    pub entity_index: HashMap<EntityId, EntityRecord>,
+    pub archetype_index: HashMap<ComponentType, ArchetypeId>,
+    pub component_index: HashMap<ComponentId, ArchetypeMap>,
 }
 
 impl World {
@@ -314,7 +314,7 @@ impl World {
         }
     }
 
-    pub fn query(&mut self) -> QueryCreator {
+    pub fn query(&self) -> QueryCreator {
         QueryCreator {
             component_ids: vec![],
         }
