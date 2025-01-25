@@ -61,7 +61,7 @@ impl EntityCreator<'_> {
         self
     }
 
-    pub fn finish(mut self) -> EntityRecord {
+    pub fn spawn(mut self) -> EntityRecord {
         if let Some(archetype_id) = self.world.archetype_index.get(&self.components_set) {
             let archetype = self.world.archetypes.get_mut(*archetype_id).unwrap();
 
@@ -249,7 +249,7 @@ mod tests {
     fn spawn_entity_with_single_component() {
         let mut world = World::default();
 
-        let entity_record = world.spawn().with_component(Health(150)).finish();
+        let entity_record = world.spawn().with_component(Health(150)).spawn();
 
         assert_eq!(world.entity_index.len(), 1);
 
@@ -282,7 +282,7 @@ mod tests {
             .spawn()
             .with_component(Health(40))
             .with_component(Name(String::from("Carles")))
-            .finish();
+            .spawn();
 
         assert_eq!(world.archetypes.len(), 1);
         assert_eq!(entity_record.archetype_id, 0);
@@ -328,10 +328,10 @@ mod tests {
         let mut world = World::default();
 
         let carles = Name(String::from("Carles"));
-        let carles = world.spawn().with_component(carles).finish();
+        let carles = world.spawn().with_component(carles).spawn();
 
         let queco = Name(String::from("Queco"));
-        let queco = world.spawn().with_component(queco).finish();
+        let queco = world.spawn().with_component(queco).spawn();
 
         assert_eq!(carles.id, 0);
         assert_eq!(carles.row, 0);
@@ -355,10 +355,10 @@ mod tests {
         let mut world = World::default();
 
         let carles = Name(String::from("Carles"));
-        let carles = world.spawn().with_component(carles).finish();
+        let carles = world.spawn().with_component(carles).spawn();
 
         let queco = Name(String::from("Queco"));
-        let queco = world.spawn().with_component(queco).finish();
+        let queco = world.spawn().with_component(queco).spawn();
 
         let (components, entities) = world.query().with_component::<Name>().run();
 
