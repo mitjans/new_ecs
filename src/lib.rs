@@ -128,23 +128,22 @@ impl EntityCreator<'_> {
     }
 }
 
-pub struct QueryCreator<'a> {
-    world: &'a mut World,
+pub struct QueryCreator {
     component_ids: Vec<ComponentId>,
 }
 
-impl<'a> QueryCreator<'a> {
+impl QueryCreator {
     pub fn with_component<T: Any>(mut self) -> Self {
         self.component_ids.push(TypeId::of::<T>());
         self
     }
 
-    pub fn run(self) -> QueryIter<'a> {
+    pub fn iter<'w>(&self, world: &'w World) -> QueryIter<'w> {
         let archetype_ids = self
             .component_ids
             .iter()
             .map(|component_id| {
-                let Some(archetype_map) = self.world.component_index.get(component_id) else {
+                let Some(archetype_map) = world.component_index.get(component_id) else {
                     panic!("Component not regitered")
                 };
 
@@ -157,20 +156,12 @@ impl<'a> QueryCreator<'a> {
             .collect();
 
         QueryIter {
-            world: self.world,
+            world,
             entity_index: 0,
             archetype_index: 0,
             archetype_ids,
-            component_ids: self.component_ids,
+            component_ids: self.component_ids.to_vec(),
         }
-    }
-}
-
-impl<'a> IntoIterator for QueryCreator<'a> {
-    type IntoIter = QueryIter<'a>;
-    type Item = QueryResult<'a>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.run()
     }
 }
 
@@ -185,10 +176,17 @@ impl QueryResult<'_> {
         let component = unsafe { &(*(*component as *const u8 as *const T)) };
         Some(component)
     }
+
+    pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
+        let component_id = TypeId::of::<T>();
+        let component = self.entity_components.get_mut(&component_id)?;
+        let component = unsafe { &mut (*(*component as *mut u8 as *mut T)) };
+        Some(component)
+    }
 }
 
-pub struct QueryIter<'a> {
-    world: &'a mut World,
+pub struct QueryIter<'w> {
+    world: &'w World,
     entity_index: usize,
     archetype_index: usize,
     archetype_ids: Vec<ArchetypeId>,
@@ -206,7 +204,7 @@ impl<'a> Iterator for QueryIter<'a> {
             let archetype = unsafe {
                 self.world
                     .archetypes
-                    .get_unchecked_mut(self.archetype_ids[self.archetype_index])
+                    .get_unchecked(self.archetype_ids[self.archetype_index])
             };
 
             if self.entity_index >= archetype.entities.len() {
@@ -220,7 +218,7 @@ impl<'a> Iterator for QueryIter<'a> {
                 .iter()
                 .map(|component_id| {
                     let components =
-                        &mut archetype.columns[archetype.column_index[component_id]].components;
+                        &archetype.columns[archetype.column_index[component_id]].components;
 
                     (*component_id, unsafe {
                         &mut *(components.get_raw(self.entity_index).unwrap() as *mut u8)
@@ -298,7 +296,6 @@ impl World {
 
     pub fn query(&mut self) -> QueryCreator {
         QueryCreator {
-            world: self,
             component_ids: vec![],
         }
     }
@@ -431,7 +428,7 @@ mod tests {
             .with_component(Health(123))
             .spawn();
 
-        let mut query_iter = world.query().with_component::<Name>().run();
+        let mut query_iter = world.query().with_component::<Name>().iter(&world);
 
         let x = query_iter.next().unwrap();
         let name = x.get::<Name>().unwrap();
@@ -469,14 +466,48 @@ mod tests {
             .query()
             .with_component::<Name>()
             .with_component::<Health>()
-            .run();
+            .iter(&world);
 
         assert_eq!(query.next().unwrap().get::<Health>().unwrap().0, 123);
         assert!(query.next().is_none());
 
-        let mut query = world.query().with_component::<Name>().run();
+        let mut query = world.query().with_component::<Name>().iter(&world);
         assert_eq!(query.next().unwrap().get::<Name>().unwrap().0, "Carles");
         assert_eq!(query.next().unwrap().get::<Name>().unwrap().0, "Queco");
         assert!(query.next().is_none());
+    }
+
+    #[test]
+    fn multiple_queries() {
+        let mut world = World::default();
+
+        let carles = Name(String::from("Carles"));
+        world.spawn().with_component(carles).spawn();
+
+        let queco = Name(String::from("Queco"));
+        world
+            .spawn()
+            .with_component(queco)
+            .with_component(Health(123))
+            .spawn();
+
+        let query1 = world.query().with_component::<Health>();
+        let query2 = world.query().with_component::<Name>();
+
+        let result1 = query1.iter(&world).next().unwrap();
+        let mut result2 = query2.iter(&world).next().unwrap();
+
+        let health = result1.get::<Health>().unwrap();
+        assert_eq!(health.0, 123);
+
+        let name = result2.get_mut::<Name>().unwrap();
+        assert_eq!(name.0, "Carles");
+
+        name.0 = String::from("Google");
+
+        let mut query = world.query().with_component::<Name>().iter(&world);
+        let result = query.next().unwrap();
+        let name = result.get::<Name>().unwrap();
+        assert_eq!(name.0, "Google");
     }
 }
