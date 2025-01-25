@@ -54,7 +54,7 @@ impl AnyVec {
         }
     }
 
-    pub fn push_raw(&mut self, bytes: *const u8) {
+    pub unsafe fn push_raw(&mut self, bytes: *const u8) {
         if self.len == self.cap {
             self.grow();
         }

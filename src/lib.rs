@@ -1,11 +1,10 @@
 mod any_vec;
 
-use any_vec::AnyVec;
+pub use any_vec::AnyVec;
 use std::{
     alloc::Layout,
     any::{Any, TypeId},
-    collections::BTreeSet,
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
 };
 
 type ArchetypeMap = HashMap<ArchetypeId, usize>;
@@ -88,7 +87,7 @@ impl EntityCreator<'_> {
                         .get_raw(*component_index)
                         .unwrap();
 
-                    column.components.push_raw(component);
+                    unsafe { column.components.push_raw(component) };
                 });
 
             self.world
@@ -130,7 +129,7 @@ impl EntityCreator<'_> {
 }
 
 pub struct QueryCreator<'a> {
-    world: &'a World,
+    world: &'a mut World,
     component_ids: Vec<ComponentId>,
 }
 
@@ -140,30 +139,98 @@ impl<'a> QueryCreator<'a> {
         self
     }
 
-    pub fn run(self) -> (Vec<&'a AnyVec>, Vec<Vec<EntityId>>) {
-        let mut components = vec![];
-        let mut entities = vec![];
+    pub fn run(self) -> QueryIter<'a> {
+        let archetype_ids = self
+            .component_ids
+            .iter()
+            .map(|component_id| {
+                let Some(archetype_map) = self.world.component_index.get(component_id) else {
+                    panic!("Component not regitered")
+                };
 
-        self.component_ids.iter().for_each(|component_id| {
-            let Some(archetype_ids) = self.world.component_index.get(component_id) else {
-                panic!("Component not registered!")
+                archetype_map.keys().copied().collect::<BTreeSet<_>>()
+            })
+            .reduce(|a, b| a.intersection(&b).cloned().collect())
+            .unwrap_or_default()
+            .iter()
+            .cloned()
+            .collect();
+
+        QueryIter {
+            world: self.world,
+            entity_index: 0,
+            archetype_index: 0,
+            archetype_ids,
+            component_ids: self.component_ids,
+        }
+    }
+}
+
+impl<'a> IntoIterator for QueryCreator<'a> {
+    type IntoIter = QueryIter<'a>;
+    type Item = QueryResult<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.run()
+    }
+}
+
+pub struct QueryResult<'a> {
+    entity_components: HashMap<ComponentId, &'a mut u8>,
+}
+
+impl QueryResult<'_> {
+    pub fn get<T: Any>(&self) -> Option<&T> {
+        let component_id = TypeId::of::<T>();
+        let component = self.entity_components.get(&component_id)?;
+        let component = unsafe { &(*(*component as *const u8 as *const T)) };
+        Some(component)
+    }
+}
+
+pub struct QueryIter<'a> {
+    world: &'a mut World,
+    entity_index: usize,
+    archetype_index: usize,
+    archetype_ids: Vec<ArchetypeId>,
+    component_ids: Vec<ComponentId>,
+}
+
+impl<'a> Iterator for QueryIter<'a> {
+    type Item = QueryResult<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.archetype_index >= self.archetype_ids.len() {
+                return None;
+            }
+
+            let archetype = unsafe {
+                self.world
+                    .archetypes
+                    .get_unchecked_mut(self.archetype_ids[self.archetype_index])
             };
 
-            archetype_ids.iter().for_each(|(archetype_id, column_id)| {
-                let Some(archetype) = self.world.archetypes.get(*archetype_id) else {
-                    panic!("Archetype not found!")
-                };
+            if self.entity_index >= archetype.entities.len() {
+                self.entity_index = 0;
+                self.archetype_index += 1;
+                continue;
+            }
 
-                let Some(column) = archetype.columns.get(*column_id) else {
-                    panic!("Column not found");
-                };
+            let entity_components = self
+                .component_ids
+                .iter()
+                .map(|component_id| {
+                    let components =
+                        &mut archetype.columns[archetype.column_index[component_id]].components;
 
-                entities.push(archetype.entities.to_vec());
-                components.push(&column.components);
-            });
-        });
+                    (*component_id, unsafe {
+                        &mut *(components.get_raw(self.entity_index).unwrap() as *mut u8)
+                    })
+                })
+                .collect();
 
-        (components, entities)
+            self.entity_index += 1;
+            return Some(QueryResult { entity_components });
+        }
     }
 }
 
@@ -229,7 +296,7 @@ impl World {
         }
     }
 
-    pub fn query(&self) -> QueryCreator {
+    pub fn query(&mut self) -> QueryCreator {
         QueryCreator {
             world: self,
             component_ids: vec![],
@@ -355,32 +422,61 @@ mod tests {
         let mut world = World::default();
 
         let carles = Name(String::from("Carles"));
-        let carles = world.spawn().with_component(carles).spawn();
+        world.spawn().with_component(carles).spawn();
 
         let queco = Name(String::from("Queco"));
-        let queco = world.spawn().with_component(queco).spawn();
+        world
+            .spawn()
+            .with_component(queco)
+            .with_component(Health(123))
+            .spawn();
 
-        let (components, entities) = world.query().with_component::<Name>().run();
+        let mut query_iter = world.query().with_component::<Name>().run();
 
-        assert_eq!(components.len(), 1);
-        assert_eq!(components.first().unwrap().len(), 2);
+        let x = query_iter.next().unwrap();
+        let name = x.get::<Name>().unwrap();
+        assert_eq!(name.0, "Carles");
 
-        assert_eq!(entities.len(), 1);
-        assert_eq!(entities.first().unwrap().len(), 2);
+        let x = query_iter.next().unwrap();
+        let name = x.get::<Name>().unwrap();
+        assert_eq!(name.0, "Queco");
 
-        let names = *components.first().unwrap();
-        let entities = entities.first().unwrap();
+        let health = x.get::<Health>();
+        assert!(health.is_none());
+    }
 
-        let first_name = names.first::<Name>().unwrap();
-        let second_name = names.get::<Name>(1).unwrap();
+    #[test]
+    fn complex_queries() {
+        let mut world = World::default();
 
-        assert_eq!(first_name.0, "Carles");
-        assert_eq!(second_name.0, "Queco");
+        let carles = Name(String::from("Carles"));
+        world.spawn().with_component(carles).spawn();
 
-        let first_entity = entities.first().unwrap();
-        let second_entity = entities.get(1).unwrap();
+        let queco = Name(String::from("Queco"));
+        world
+            .spawn()
+            .with_component(queco)
+            .with_component(Health(123))
+            .spawn();
 
-        assert_eq!(first_entity, &carles.row);
-        assert_eq!(second_entity, &queco.row);
+        // Check world indexes
+        assert_eq!(world.component_index.len(), 2);
+        assert_eq!(world.archetype_index.len(), 2);
+        assert_eq!(world.entity_index.len(), 2);
+
+        // Assert queries
+        let mut query = world
+            .query()
+            .with_component::<Name>()
+            .with_component::<Health>()
+            .run();
+
+        assert_eq!(query.next().unwrap().get::<Health>().unwrap().0, 123);
+        assert!(query.next().is_none());
+
+        let mut query = world.query().with_component::<Name>().run();
+        assert_eq!(query.next().unwrap().get::<Name>().unwrap().0, "Carles");
+        assert_eq!(query.next().unwrap().get::<Name>().unwrap().0, "Queco");
+        assert!(query.next().is_none());
     }
 }
