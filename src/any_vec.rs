@@ -54,6 +54,8 @@ impl AnyVec {
         }
     }
 
+    /// # Safety
+    /// > _Not sure yet_
     pub unsafe fn push_raw(&mut self, bytes: *const u8) {
         if self.len == self.cap {
             self.grow();
@@ -127,6 +129,10 @@ impl AnyVec {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn layout(&self) -> Layout {
